@@ -590,8 +590,8 @@ function render(isFlat){
 		}else{
 			
 			//view	
-			//update eyeZ based on the object's new max Z after translation
-			eyeZ = authoParameter[1]*2;		
+			//update eyeZ based on the object's new max Z after translation------------ Correct this for Perspective to work...//
+			//eyeZ = ??;		
 			var viewMat = new Matrix4();
 			viewMat.setLookAt(eyeX, eyeY, eyeZ, centerX, centerY, centerZ, upX, upY, upZ);
 			gl.uniformMatrix4fv(viewMatLoc, false, viewMat.elements);
@@ -601,7 +601,7 @@ function render(isFlat){
 			var  persMat = new Matrix4();			
 			//we have to determine near and far based on where the user is
 			persMat.setPerspective(fovy, aspect, 1, far)
-			//persMat.setFrustum(authoParameter[0], authoParameter[1], authoParameter[0], authoParameter[1],  10, far);
+			
 			gl.uniformMatrix4fv(projectMatLoc, false, persMat.elements);			
 		}
 	
