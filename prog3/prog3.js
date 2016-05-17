@@ -1,16 +1,13 @@
 var gl;
-var transUniform ;
 var viewMatLoc;
 var projectMatLoc;
 var newVertices; // this will contain only the vertices(indices discarded)
-var uniformNormalLoc;
-var amountOfLightLoc;
-var extractedVerticesAndColor;
+var extractedVertices_;
 var noVertices;
 var dynamic_index;
 var isFlatLoc;
-var flatNormalLoc;
-var halfVecLoc;
+var flatNormalLoc; 
+var halfVecLoc; // Location of the half vactor in the shader program, refer to the render function for its use.
 var viewerDirectionLoc;
 var makeFlat = 1;
 var diffuseOnly = true;
@@ -30,35 +27,30 @@ var diffuseDirection = new Float32Array([0,0,1]);
 var mouseDownBool = false;
 var canvasWidth;
 var canvasHeight;
-var scaleNormalizer = 50;
-var xyzScale =1;
-var scaleLimit = 0.1;
-var noObjects =1;
-var objectVerticesArray = new Array(noObjects);
-var objectIndexArray = new Array(noObjects);
-var normalForFlatArray = new Array(noObjects);
-var surfaceCenterForFlatArray = new Array(noObjects);
-var noFacesArray = new Array(noObjects);
-var modelMatArray = new Array(0); // initialize zero
-var minMaxXYZArray = new Array(noObjects);
-var newXYZTrans = new Array(noObjects);
-var rotationXYZ = new Array(noObjects);
+var scaleNormalizer = 50; // Okay this was obtained after certain tests. You are expected to estimate it rightly. I was only being lazy.
+var scaleLimit = 0.1; //This just ensures the object is not scaled beyond view
+var noObjects =1; // Variable used to keep track of how many objects are loaded
+var objectVerticesArray = new Array(noObjects); // Each element of this array is a Float32Array that caries the vertex info for an object
+var objectIndexArray = new Array(noObjects); //Each element of this array is a Uint16Array that caries the Index info for an object
+var normalForFlatArray = new Array(noObjects); //array that carries normal for each object face. For Flat shading
+var surfaceCenterForFlatArray = new Array(noObjects); //array that carries estimated surface center for each object face
+var noFacesArray = new Array(noObjects); // Array that carries number of faces for each object
+var modelMatArray = new Array(0); // initialize zero..//currently unused
+var minMaxXYZArray = new Array(noObjects); // carries Min/max XYZ info for each object
+var newXYZTrans = new Array(noObjects); // translation array, contains info for each pbject. See the call to createModel in the render function
+var rotationXYZ = new Array(noObjects); //rotation array, contains info for each object
 var uniformScaleXYZArray = new Array(noObjects);
 var currSelectedObj = 0; //0 indexed variable for the currently selected object
-var colorFrameBuffer;
-var holdTexture;
-var textureWidth = 512;
-var textureHeight = 512;
-var renderBuffer;
-var isSelection = false;
-var objColorCodes = new Float32Array([20,40,60,80,100,120,140, 160, 180, 200, 220, 240]);
-var colorCodeLoc;
-var isSelectionLoc;
-var pointLightPos = new Float32Array([0.5,0.5,0.5]);
-var pointLightPosLoc;
-var surfaceCenterLoc;
-var isLightLoc;
+var isSelection = false; //javascript check for selection mode
+var objColorCodes = new Float32Array([20,40,60,80,100,120,140, 160, 180, 200, 220, 240]); // Color codes for selecting different object. This should not be hard coded
+var colorCodeLoc; // location for the color code
+var isSelectionLoc; //location of variable used to check if the current render mode is a selection mode in shader
+var pointLightPos = new Float32Array([0.5,0.5,0.5]); // variable for initial point light position
+var pointLightPosLoc; // location for point light
+var surfaceCenterLoc; // Location of variable that carries the estimated center for flat shading
+var isLightLoc; // Location of the light in the shader program
 
+//hard coded cube, carries point light location info
 var cubeCoor = new Float32Array([
 									1, -1, -1,  1,
 									2,  1, -1,  1,
@@ -82,7 +74,7 @@ var cubePoly = new Uint16Array([
 								
 								]);
 
-
+//modes for object manipulation
 var modes = {
 	
 		ROTATE: 0,
@@ -97,6 +89,7 @@ var currentMode = modes.DEFAULT;
 var halfVector =  new Float32Array([0,0,0]);
 var shininess =0;
 
+//perspective projection parameters
 //view
 var eyeX = 0.0;
 var eyeY = 0.0;
@@ -137,9 +130,9 @@ var V_SHADER =
 'f_normal = mat3(model) * flat_normal; \n' + 
 'vec4 mPosition = vec4(a_position ,1.0);'+
 'vec4 bPosition = model *  mPosition;'+
-'vertexPosition = vec3(bPosition.x/bPosition.w , bPosition.y/bPosition.w, bPosition.x/bPosition.w); \n' + 
+'vertexPosition = vec3(bPosition.x/bPosition.w , bPosition.y/bPosition.w, bPosition.x/bPosition.w); \n' + //this is used to calculate the light, we must ensure the point source and the object are in the same space(+-1 cube)
 'bPosition = model *  vec4(surfaceCenter, 1.0);'+
-'surfaceCenterInCube = vec3(bPosition.x/bPosition.w , bPosition.y/bPosition.w, bPosition.x/bPosition.w); \n' + 
+'surfaceCenterInCube = vec3(bPosition.x/bPosition.w , bPosition.y/bPosition.w, bPosition.x/bPosition.w); \n' + //this is used to calculate the light, we must ensure the point source and the object center are in the same space(+-1 cube)
 'mPosition = projectMat * viewMat * model *  mPosition; '+
 'gl_Position =  mPosition;\n' + 
 '}\n'
@@ -252,52 +245,6 @@ function createProgram( gl, vertexShader, fragmentShader){
 	
 }
 
-function renderForSelection(){
-
-	 gl.bindFramebuffer(gl.FRAMEBUFFER, colorFrameBuffer);
-	 gl.viewport(0,0,canvasWidth, canvasHeight);
-	
-	 render(makeFlat);
-	 		 
-}
-
-function initSelectionComponents(){
-	
-	
- //Frame buffer and binding
-	colorFrameBuffer = gl.createFramebuffer();
-   gl.bindFramebuffer(gl.FRAMEBUFFER, colorFrameBuffer);
-
-//bind the texture
-	holdTexture = gl.createTexture();
-	gl.bindTexture(gl.TEXTURE_2D, holdTexture);
-
-//texture
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvasWidth, canvasHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-  
- //render buffer for depth
-    renderbuffer = gl.createRenderbuffer();
-    gl.bindRenderbuffer(gl.RENDERBUFFER, renderbuffer);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, canvasWidth, canvasHeight);
-    
-    //
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, holdTexture, 0);
-	gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, renderbuffer);
-	
-	
-}
-
-function backToDefaultRender(){
-	
-	gl.bindTexture(gl.TEXTURE_2D, null);
-    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-	
-}
 function main(){
 	
 //obtain canvas and webgl context
@@ -380,8 +327,6 @@ surfaceCenterLoc = gl.getUniformLocation(program, 'surfaceCenter');
 
 pointLightPosLoc = gl.getUniformLocation(program, 'pointLightPos');
  
-//uniformNormalLoc = gl.getUniformLocation(program, 'faceNormal');
-
 //get and set specular light
 var specLightReflecLoc = gl.getUniformLocation(program, 'specLightReflec');
 
@@ -539,6 +484,9 @@ function getClickedObjIndex(pseudoXY  , noObjects){
 
 }
 
+//after double clicking, we re-render where each object has a different color
+//Then we do readpixels
+//Then we re-render back again to draw the object
 function selectObject(e){
     var rect = canvas.getBoundingClientRect();
     var mouseX = e.clientX  - rect.left; ;
@@ -565,7 +513,7 @@ function selectObject(e){
     //switch back to normal drawing
     isSelection = false;
     gl.uniform1f(isSelectionLoc, 0.0);
-    //backToDefaultRender();
+
     render(makeFlat);
    
 
@@ -816,17 +764,16 @@ function fileReadFunc(){
 				 				
 				//wait and ensure prevous file has been read
 				
-				extractedVerticesAndColor = Float32Array.from(dynamic_vertex);
+				extractedVertices_ = Float32Array.from(dynamic_vertex);
 				
 				//check if it is the first object before updating
 				if(noObjects == 1)
-					minMaxXYZArray[0] = getMinMaxXYZ(extractedVerticesAndColor, noVertices);				
+					minMaxXYZArray[0] = getMinMaxXYZ(extractedVertices_, noVertices);				
 				else
-					minMaxXYZArray.push(getMinMaxXYZ(extractedVerticesAndColor, noVertices));
+					minMaxXYZArray.push(getMinMaxXYZ(extractedVertices_, noVertices));
 					
 					
-				//update global minMaxXYZ
-				//minMaxXYZ = updateMinMaxXYZ(noObjects , minMaxXYZArray);							
+									
 			
 /*********************************** POLY FILE --Contained in onload of .COOR file, as it needs data from it ************************************/					
 			
@@ -976,20 +923,22 @@ function fileReadFunc(){
 			cReader.readAsText(coorFile);
 			
 }
-		
+
+//A strip down version of the fileReadFunc. Its just for the cube. An easy and lazy implementation almost guaranteed to work.	
+//Take note that I assumed the initial position (0.5,0.5,0.5) is in the -+1 cube.
 function putLight(){
 	
 				noVertices = 8;
 				 				
 				//wait and ensure prevous file has been read
 				
-				extractedVerticesAndColor = cubeCoor;
+				extractedVertices_ = cubeCoor;
 				
 				//check if it is the first object before updating
 				if(noObjects == 1)
-					minMaxXYZArray[0] = getMinMaxXYZ(extractedVerticesAndColor, noVertices);				
+					minMaxXYZArray[0] = getMinMaxXYZ(extractedVertices_, noVertices);				
 				else
-					minMaxXYZArray.push(getMinMaxXYZ(extractedVerticesAndColor, noVertices));
+					minMaxXYZArray.push(getMinMaxXYZ(extractedVertices_, noVertices));
 		
 			 var noFaces = 6;
 			
@@ -1434,38 +1383,3 @@ function getMinMaxXYZ(verticesArray , noVertices){
 
 }
 
-function updateMinMaxXYZ(noObjects , minMaxXYZArray){
-	
-	var minX;
-	var maxX;
-	var minY;
-	var maxY;
-	var minZ;
-	var maxZ;
-	
-	
-	minX = minMaxXYZArray[0][0];
-	maxX = minMaxXYZArray[0][1];
-	minY = minMaxXYZArray[0][2];
-	maxY = minMaxXYZArray[0][3];
-	minZ = minMaxXYZArray[0][4];
-	maxZ = minMaxXYZArray[0][5];
-	
-	
-	for(var i= 0; i<noObjects ; i++){
-		
-		if(minMaxXYZArray[i][0] < minX) minX = minMaxXYZArray[i][0];
-		if(minMaxXYZArray[i][2] < minY) minY = minMaxXYZArray[i][2];
-		if(minMaxXYZArray[i][4] < minZ) minZ = minMaxXYZArray[i][4];
-		
-		if(minMaxXYZArray[i][1] > maxX) maxX = minMaxXYZArray[i][1];
-		if(minMaxXYZArray[i][3] > maxY) maxY = minMaxXYZArray[i][3];
-		if(minMaxXYZArray[i][5] > maxZ) maxZ = minMaxXYZArray[i][5];
-		
-	}
-	
-	var	minMaxXYZ = new Float32Array([ minX, maxX, minY, maxY, minZ, maxZ ]);
-	
-	return minMaxXYZ;
-	
-}
